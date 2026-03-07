@@ -63,6 +63,37 @@ VectorByte runs entirely inside Docker containers, ensuring it works perfectly a
    docker compose down
    ```
 
+### 🚀 Enabling GPU Acceleration (NVIDIA CUDA)
+By default, VectorByte uses CPU-only PyTorch to ensure compatibility across all systems and prevent memory crashes. For a **massive** performance boost during the AI Super-Resolution stage, you can enable NVIDIA GPU support:
+
+1. Open `backend/Dockerfile` and change the PyTorch installation lines:
+   **From (CPU-only):**
+   ```dockerfile
+   RUN pip install --upgrade pip \
+       && pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cpu \
+       && pip install --no-cache-dir -r requirements.txt
+   ```
+   **To (CUDA 12.4):**
+   ```dockerfile
+   RUN pip install --upgrade pip \
+       && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu124 \
+       && pip install --no-cache-dir -r requirements.txt
+   ```
+2. Open `docker-compose.yml` and add the `deploy` block under the `backend` service to pass your GPU to the container:
+   ```yaml
+   services:
+     backend:
+       # ... other config ...
+       deploy:
+         resources:
+           reservations:
+             devices:
+               - driver: nvidia
+                 count: 1
+                 capabilities: [gpu]
+   ```
+3. Rebuild the image: `docker compose build backend && docker compose up -d`
+
 ---
 
 ## 🛠️ Expert Overrides
