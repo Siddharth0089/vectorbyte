@@ -1,0 +1,62 @@
+# ============================================================
+# Docker Compose — VectorForge R2V Application
+# ============================================================
+# Compatible with Kali Linux host — uses explicit UID/GID
+# for volume mount permissions.
+#
+# Usage:
+#   docker compose build
+#   docker compose up -d
+#   Open http://localhost:3000
+# ============================================================
+
+services:
+  # ---- Backend: FastAPI + OpenCV + PyTorch + Real-ESRGAN ----
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: vectorforge-backend
+    restart: unless-stopped
+    environment:
+      - UPLOAD_DIR=/app/uploads
+      - ESRGAN_MODEL_PATH=/app/models/RealESRGAN_x4plus.pth
+    volumes:
+      - uploads_data:/app/uploads
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+    networks:
+      - vectorforge
+
+  # ---- Frontend: React + Nginx ----
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vectorforge-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_started
+    networks:
+      - vectorforge
+
+volumes:
+  uploads_data:
+    driver: local
+
+networks:
+  vectorforge:
+    driver: bridge
