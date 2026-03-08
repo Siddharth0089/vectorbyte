@@ -11,11 +11,15 @@ const API_BASE = '/api';
 const DEFAULT_SETTINGS = {
     detail_level: 'medium',
     color_count: 12,
-    auto_colors: true,
+    auto_colors: false,
     input_quality: 'medium',
     edge_smoothness: 50,
     noise_tolerance: 50,
     enable_superres: true,
+    image_profile: 'auto',
+    ai_model: 'general',
+    tracing_engine: 'vtracer',
+    clustering_method: 'kmeans',
     filter_speckle: null,
     corner_threshold: null,
     length_threshold: null,
@@ -80,6 +84,8 @@ export default function App() {
                     edge_smoothness: rec.edge_smoothness ?? prev.edge_smoothness,
                     noise_tolerance: rec.noise_tolerance ?? prev.noise_tolerance,
                     enable_superres: rec.enable_superres ?? prev.enable_superres,
+                    image_profile: rec.image_profile ?? prev.image_profile,
+                    ai_model: rec.ai_model ?? prev.ai_model,
                 }));
                 if (data.original_url) {
                     setOriginalUrl(`${API_BASE}${data.original_url.startsWith('/api') ? data.original_url.slice(4) : data.original_url}`);

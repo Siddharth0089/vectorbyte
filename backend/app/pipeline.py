@@ -15,8 +15,7 @@ PipelineConfig for full user control over every parameter.
 import subprocess
 import tempfile
 import os
-import json
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from typing import Optional, Literal
 
 import cv2
@@ -236,6 +235,10 @@ class ImageAnalyzer:
         upscaling back perfectly matches the original, it's likely pixel art
         or simple rasterized low-res graphics.
         """
+        # Avoid resize edge cases and quickly classify ultra-tiny assets.
+        if self.w < 8 or self.h < 8:
+            return color_count <= 32
+
         # Pixel art is usually tiny or has very few colors
         if self.w * self.h > 1000 * 1000 or color_count > 32:
             return False
@@ -243,13 +246,17 @@ class ImageAnalyzer:
         # Try a quick resize comparison to detect blockiness
         # If we shrink to 1/4th and scale back up via nearest-neighbor, 
         # does it look nearly identical to the original?
-        small = cv2.resize(self.gray, (self.w // 4, self.h // 4), interpolation=cv2.INTER_NEAREST)
+        downscale = 4 if min(self.w, self.h) >= 16 else 2
+        small_w = max(1, self.w // downscale)
+        small_h = max(1, self.h // downscale)
+        small = cv2.resize(self.gray, (small_w, small_h), interpolation=cv2.INTER_NEAREST)
         reconstructed = cv2.resize(small, (self.w, self.h), interpolation=cv2.INTER_NEAREST)
         
         diff = cv2.absdiff(self.gray, reconstructed)
         mean_diff = np.mean(diff)
         
-        return mean_diff < 5.0  # Very tight threshold for perfect grid blockiness
+        threshold = 6.0 if min(self.w, self.h) < 48 else 5.0
+        return mean_diff < threshold
 
 
 # ---------------------------------------------------------------------------
@@ -279,6 +286,10 @@ def stage_bilateral(image_bgr: np.ndarray, config: PipelineConfig) -> np.ndarray
     Smooth flat areas while preserving edges.
     Parameters adapt to noise_tolerance and edge_smoothness.
     """
+    if config.image_profile == "pixel_art":
+        print("[pipeline] Pixel Art mode: skipping bilateral filter to preserve hard edges")
+        return image_bgr
+
     # Map noise_tolerance (0-100) to sigma values
     sigma_color = 30 + int(config.noise_tolerance * 1.2)   # 30–150
     sigma_space = 30 + int(config.edge_smoothness * 1.2)    # 30–150
@@ -302,6 +313,20 @@ def stage_quantize(image_bgr: np.ndarray, config: PipelineConfig) -> np.ndarray:
     """
     Reduce colors using selected clustering method.
     """
+    h, w, _ = image_bgr.shape
+    total_pixels = h * w
+    if total_pixels == 0:
+        return image_bgr
+
+    # K cannot exceed number of points (OpenCV would fail).
+    k = max(2, min(int(config.color_count), 64, total_pixels))
+
+    # Preserve exact palette for pixel art if already within requested K.
+    if config.image_profile == "pixel_art":
+        unique_colors = len(np.unique(image_bgr.reshape(-1, 3), axis=0))
+        if unique_colors <= k:
+            return image_bgr.copy()
+
     # 1. Mean-Shift Clustering (Accurate spatial grouping, preserves thin lines)
     if config.clustering_method == "mean_shift":
         sp = 10  # Spatial window radius
@@ -312,7 +337,6 @@ def stage_quantize(image_bgr: np.ndarray, config: PipelineConfig) -> np.ndarray:
         image_bgr = shifted
 
     # 2. K-Means Clustering
-    k = config.color_count
     h, w, c = image_bgr.shape
     pixel_values = np.float32(image_bgr.reshape(-1, 3))
 
@@ -397,6 +421,18 @@ def _get_vtracer_params(config: PipelineConfig) -> dict:
     noise_factor = config.noise_tolerance / 50.0
     params["filter_speckle"] = max(1, int(params["filter_speckle"] * noise_factor))
 
+    if config.image_profile == "pixel_art":
+        params.update({
+            "filter_speckle": 1,
+            "color_precision": 10,
+            "layer_difference": 4,
+            "corner_threshold": 10,
+            "length_threshold": 1.0,
+            "max_iterations": 20,
+            "splice_threshold": 10,
+            "path_precision": 1,
+        })
+
     # User overrides
     for key in ["filter_speckle", "corner_threshold", "length_threshold",
                 "splice_threshold", "path_precision", "color_precision",
@@ -423,15 +459,28 @@ def stage_vectorize(image_bgr: np.ndarray, config: PipelineConfig) -> str:
         pil_img.save(tmp_path, format="PNG")
 
     params = _get_vtracer_params(config)
+    mode = "polygon" if config.image_profile == "pixel_art" else "spline"
 
     try:
         svg_str = vtracer.convert_image_to_svg_py(
             tmp_path,
             colormode="color",
             hierarchical="stacked",
-            mode="spline",
+            mode=mode,
             **params,
         )
+    except Exception:
+        # Older vtracer builds may not support polygon mode.
+        if mode != "spline":
+            svg_str = vtracer.convert_image_to_svg_py(
+                tmp_path,
+                colormode="color",
+                hierarchical="stacked",
+                mode="spline",
+                **params,
+            )
+        else:
+            raise
     finally:
         os.unlink(tmp_path)
 
@@ -543,7 +592,8 @@ def run_pipeline(
     print("[pipeline] Stage 2/5 — Bilateral Filter...")
     img = stage_bilateral(img, config)
 
-    print(f"[pipeline] Stage 3/5 — K-Means Color Quantization (K={config.color_count})...")
+    clustering_label = "Mean-Shift + K-Means" if config.clustering_method == "mean_shift" else "K-Means"
+    print(f"[pipeline] Stage 3/5 — {clustering_label} Color Quantization (K={config.color_count})...")
     img = stage_quantize(img, config)
 
     print("[pipeline] Stage 4/5 — Vectorization (vtracer)...")

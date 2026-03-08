@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 const API_BASE = '/api';
 
@@ -9,12 +9,20 @@ const API_BASE = '/api';
 export default function BatchView({ files, settings, onComplete, onReset }) {
     const [results, setResults] = useState([]);
     const [processing, setProcessing] = useState(false);
-    const [progress, setProgress] = useState(0);
+    const previewUrls = useMemo(
+        () => files.map((file) => URL.createObjectURL(file)),
+        [files],
+    );
+
+    useEffect(() => {
+        return () => {
+            previewUrls.forEach((url) => URL.revokeObjectURL(url));
+        };
+    }, [previewUrls]);
 
     const handleProcessAll = async () => {
         setProcessing(true);
         setResults([]);
-        setProgress(0);
 
         const formData = new FormData();
         files.forEach(f => formData.append('files', f));
@@ -35,7 +43,6 @@ export default function BatchView({ files, settings, onComplete, onReset }) {
 
             const data = await res.json();
             setResults(data.results || []);
-            setProgress(100);
             if (onComplete) onComplete(data.results);
         } catch (err) {
             console.error('Batch processing failed:', err);
@@ -134,7 +141,7 @@ export default function BatchView({ files, settings, onComplete, onReset }) {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {files.map((file, i) => {
                     const result = results[i];
-                    const previewUrl = URL.createObjectURL(file);
+                    const previewUrl = previewUrls[i];
                     return (
                         <div key={i} className="rounded-xl border border-surface-200/10 bg-surface-900/40 overflow-hidden group">
                             {/* Thumbnail */}

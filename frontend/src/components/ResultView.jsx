@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
     ReactCompareSlider,
     ReactCompareSliderImage,
@@ -13,7 +13,6 @@ const EXPORT_FORMATS = [
 ];
 
 export default function ResultView({ originalUrl, svgData, jobId, onReset, onEdit }) {
-    const [exportFormat, setExportFormat] = useState('svg');
     const [showFormatMenu, setShowFormatMenu] = useState(false);
     const [exporting, setExporting] = useState(false);
 
@@ -22,6 +21,12 @@ export default function ResultView({ originalUrl, svgData, jobId, onReset, onEdi
         const blob = new Blob([svgData], { type: 'image/svg+xml' });
         return URL.createObjectURL(blob);
     }, [svgData]);
+
+    useEffect(() => {
+        return () => {
+            if (svgBlobUrl) URL.revokeObjectURL(svgBlobUrl);
+        };
+    }, [svgBlobUrl]);
 
     const handleDownload = async (format = 'svg') => {
         if (!svgData) return;

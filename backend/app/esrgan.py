@@ -5,9 +5,7 @@ Uses the RealESRGANer class from the realesrgan library.
 
 import os
 import numpy as np
-import os
 import torch
-import numpy as np
 from basicsr.archs.rrdbnet_arch import RRDBNet
 from realesrgan import RealESRGANer
 
